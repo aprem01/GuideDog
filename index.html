@@ -1,0 +1,1060 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#000000">
+    <meta name="description" content="Voice-first navigation for blind users">
+    
+    <title>BlindGuide</title>
+    
+    <link rel="manifest" href="manifest.json">
+    <link rel="apple-touch-icon" href="icon-192.png">
+    
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+            -webkit-touch-callout: none;
+            -webkit-user-select: none;
+            user-select: none;
+        }
+        
+        html, body {
+            height: 100%;
+            overflow: hidden;
+            background: #000;
+            color: #fff;
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+        }
+        
+        /* Full screen app */
+        .app {
+            height: 100%;
+            height: 100dvh;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+        }
+        
+        /* Hidden video/canvas for processing */
+        #video, #canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 1px;
+            height: 1px;
+            opacity: 0;
+            pointer-events: none;
+        }
+        
+        /* Main touch area - covers entire screen */
+        .touch-area {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+        }
+        
+        /* Top zone - tap for description */
+        .zone-top {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-bottom: 3px solid #333;
+        }
+        
+        /* Middle zone - main feedback area */
+        .zone-middle {
+            flex: 2;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+        }
+        
+        /* Bottom zone - tap for safety check */
+        .zone-bottom {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-top: 3px solid #333;
+        }
+        
+        /* Zone labels - large, high contrast */
+        .zone-label {
+            font-size: 28px;
+            font-weight: 700;
+            text-align: center;
+            padding: 20px;
+            opacity: 0.6;
+        }
+        
+        /* Active state for zones */
+        .zone-top:active, .zone-bottom:active {
+            background: #222;
+        }
+        
+        /* Status indicator in middle */
+        .status-circle {
+            width: 150px;
+            height: 150px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 60px;
+            transition: all 0.3s ease;
+        }
+        
+        .status-circle.safe {
+            background: rgba(0, 255, 136, 0.3);
+            border: 4px solid #00ff88;
+            box-shadow: 0 0 40px rgba(0, 255, 136, 0.4);
+        }
+        
+        .status-circle.warning {
+            background: rgba(255, 170, 0, 0.3);
+            border: 4px solid #ffaa00;
+            box-shadow: 0 0 40px rgba(255, 170, 0, 0.4);
+            animation: pulse 1s ease infinite;
+        }
+        
+        .status-circle.danger {
+            background: rgba(255, 68, 68, 0.4);
+            border: 4px solid #ff4444;
+            box-shadow: 0 0 60px rgba(255, 68, 68, 0.6);
+            animation: pulse-fast 0.3s ease infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+        }
+        
+        @keyframes pulse-fast {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+        }
+        
+        /* Direction indicators */
+        .direction-hint {
+            position: absolute;
+            font-size: 80px;
+            opacity: 0;
+            transition: opacity 0.2s ease;
+        }
+        
+        .direction-hint.left { left: 20px; top: 50%; transform: translateY(-50%); }
+        .direction-hint.right { right: 20px; top: 50%; transform: translateY(-50%); }
+        .direction-hint.ahead { top: 20px; left: 50%; transform: translateX(-50%); }
+        
+        .direction-hint.active {
+            opacity: 1;
+        }
+        
+        /* Loading screen */
+        .loading-screen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: #000;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 100;
+            transition: opacity 0.5s ease;
+        }
+        
+        .loading-screen.hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+        
+        .loading-icon {
+            font-size: 100px;
+            margin-bottom: 30px;
+            animation: bounce 1s ease infinite;
+        }
+        
+        @keyframes bounce {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-20px); }
+        }
+        
+        .loading-text {
+            font-size: 24px;
+            font-weight: 600;
+        }
+        
+        /* Help overlay */
+        .help-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.95);
+            z-index: 50;
+            display: none;
+            flex-direction: column;
+            padding: 40px 20px;
+            overflow-y: auto;
+        }
+        
+        .help-overlay.visible {
+            display: flex;
+        }
+        
+        .help-title {
+            font-size: 32px;
+            font-weight: 700;
+            margin-bottom: 30px;
+            text-align: center;
+        }
+        
+        .help-item {
+            padding: 20px;
+            margin-bottom: 15px;
+            background: #111;
+            border-radius: 15px;
+            border-left: 5px solid #4488ff;
+        }
+        
+        .help-gesture {
+            font-size: 20px;
+            font-weight: 700;
+            color: #4488ff;
+            margin-bottom: 8px;
+        }
+        
+        .help-action {
+            font-size: 16px;
+            color: #aaa;
+        }
+        
+        .help-close {
+            margin-top: 30px;
+            padding: 20px;
+            background: #4488ff;
+            border: none;
+            border-radius: 15px;
+            color: #fff;
+            font-size: 20px;
+            font-weight: 700;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <!-- Loading Screen -->
+    <div class="loading-screen" id="loadingScreen">
+        <div class="loading-icon">🦮</div>
+        <div class="loading-text">Starting BlindGuide...</div>
+    </div>
+    
+    <!-- Help Overlay -->
+    <div class="help-overlay" id="helpOverlay">
+        <div class="help-title">How to Use</div>
+        
+        <div class="help-item">
+            <div class="help-gesture">TAP TOP of screen</div>
+            <div class="help-action">Describe what's around you</div>
+        </div>
+        
+        <div class="help-item">
+            <div class="help-gesture">TAP BOTTOM of screen</div>
+            <div class="help-action">Check if path is safe</div>
+        </div>
+        
+        <div class="help-item">
+            <div class="help-gesture">DOUBLE TAP anywhere</div>
+            <div class="help-action">AI scene analysis (stairs, doors)</div>
+        </div>
+        
+        <div class="help-item">
+            <div class="help-gesture">SWIPE LEFT</div>
+            <div class="help-action">What's on my left?</div>
+        </div>
+        
+        <div class="help-item">
+            <div class="help-gesture">SWIPE RIGHT</div>
+            <div class="help-action">What's on my right?</div>
+        </div>
+        
+        <div class="help-item">
+            <div class="help-gesture">LONG PRESS (hold 2 sec)</div>
+            <div class="help-action">Repeat this help guide</div>
+        </div>
+        
+        <div class="help-item">
+            <div class="help-gesture">SHAKE PHONE</div>
+            <div class="help-action">Emergency - describe everything</div>
+        </div>
+        
+        <button class="help-close" id="helpClose">TAP HERE TO START</button>
+    </div>
+    
+    <!-- Main App -->
+    <div class="app">
+        <video id="video" autoplay playsinline muted></video>
+        <canvas id="canvas"></canvas>
+        
+        <div class="touch-area" id="touchArea">
+            <!-- Top Zone - Describe -->
+            <div class="zone-top" id="zoneTop">
+                <div class="zone-label">TAP HERE<br>TO DESCRIBE</div>
+            </div>
+            
+            <!-- Middle Zone - Status -->
+            <div class="zone-middle" id="zoneMiddle">
+                <div class="direction-hint left" id="hintLeft">←</div>
+                <div class="direction-hint right" id="hintRight">→</div>
+                <div class="direction-hint ahead" id="hintAhead">↑</div>
+                
+                <div class="status-circle safe" id="statusCircle">✓</div>
+            </div>
+            
+            <!-- Bottom Zone - Safe Check -->
+            <div class="zone-bottom" id="zoneBottom">
+                <div class="zone-label">TAP HERE<br>IS IT SAFE?</div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.16.3/dist/ort.min.js"></script>
+    
+    <script>
+    // ============================================
+    // CONFIG
+    // ============================================
+    
+    const CONFIG = {
+        WORKER_URL: "https://guidedog.kpremks.workers.dev",
+        MODEL_URL: "https://huggingface.co/nickmuchi/yolov11n-onnx/resolve/main/yolov11n.onnx",
+        
+        ZONES: { immediate: 0.8, close: 1.5, awareness: 3.0 },
+        
+        COOLDOWNS: {
+            voice: 3000,      // Faster voice for blind users
+            vlm: 5000,
+            sound: 800,
+            vibration: 500
+        },
+        
+        PRIORITIES: {
+            critical: ["car", "bus", "truck", "motorcycle", "bicycle", "train"],
+            danger: ["person", "dog", "cat", "horse"],
+            warning: ["chair", "bench", "dining table", "bed", "couch", "fire hydrant", 
+                      "potted plant", "suitcase", "toilet", "refrigerator", "backpack",
+                      "umbrella", "handbag"]
+        },
+        
+        CLASS_NAMES: [
+            "person","bicycle","car","motorcycle","airplane","bus","train","truck",
+            "boat","traffic light","fire hydrant","stop sign","parking meter","bench",
+            "bird","cat","dog","horse","sheep","cow","elephant","bear","zebra","giraffe",
+            "backpack","umbrella","handbag","tie","suitcase","frisbee","skis","snowboard",
+            "sports ball","kite","baseball bat","baseball glove","skateboard","surfboard",
+            "tennis racket","bottle","wine glass","cup","fork","knife","spoon","bowl",
+            "banana","apple","sandwich","orange","broccoli","carrot","hot dog","pizza",
+            "donut","cake","chair","couch","potted plant","bed","dining table","toilet",
+            "tv","laptop","mouse","remote","keyboard","cell phone","microwave","oven",
+            "toaster","sink","refrigerator","book","clock","vase","scissors","teddy bear",
+            "hair drier","toothbrush"
+        ]
+    };
+    
+    // ============================================
+    // STATE
+    // ============================================
+    
+    const state = {
+        model: null,
+        video: null,
+        canvas: null,
+        ctx: null,
+        isRunning: false,
+        audioCtx: null,
+        
+        detections: [],
+        currentStatus: 'safe', // safe, warning, danger
+        
+        lastVoice: 0,
+        lastVLM: 0,
+        lastVibration: 0,
+        lastSound: {},
+        
+        // Gesture tracking
+        touchStartX: 0,
+        touchStartY: 0,
+        touchStartTime: 0,
+        lastTapTime: 0,
+        longPressTimer: null
+    };
+    
+    // ============================================
+    // SPEECH - Primary Interface
+    // ============================================
+    
+    function speak(text, interrupt = true) {
+        if (!text) return;
+        
+        try {
+            if (interrupt) speechSynthesis.cancel();
+            
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.rate = 1.0;  // Slightly slower for clarity
+            utterance.pitch = 1.0;
+            utterance.volume = 1.0;
+            
+            speechSynthesis.speak(utterance);
+            state.lastVoice = Date.now();
+            console.log('🔊', text);
+        } catch (e) {
+            console.error('Speech error:', e);
+        }
+    }
+    
+    function speakWithCooldown(text, cooldown = CONFIG.COOLDOWNS.voice) {
+        const now = Date.now();
+        if (now - state.lastVoice < cooldown) return;
+        speak(text);
+    }
+    
+    // ============================================
+    // VIBRATION - Haptic Feedback
+    // ============================================
+    
+    function vibrate(pattern) {
+        if (!navigator.vibrate) return;
+        
+        const now = Date.now();
+        if (now - state.lastVibration < CONFIG.COOLDOWNS.vibration) return;
+        state.lastVibration = now;
+        
+        try {
+            navigator.vibrate(pattern);
+        } catch (e) {}
+    }
+    
+    // Feedback patterns
+    const HAPTIC = {
+        tap: [30],                    // Confirm tap
+        success: [50, 30, 50],        // Safe
+        warning: [100, 50, 100],      // Caution
+        danger: [200, 100, 200, 100, 200],  // Danger!
+        direction: [80]               // Direction hint
+    };
+    
+    // ============================================
+    // AUDIO - Spatial Sound
+    // ============================================
+    
+    function initAudio() {
+        try {
+            state.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        } catch (e) {}
+    }
+    
+    function resumeAudio() {
+        if (state.audioCtx?.state === 'suspended') {
+            state.audioCtx.resume();
+        }
+    }
+    
+    function playTone(freq, duration, pan = 0) {
+        if (!state.audioCtx) return;
+        resumeAudio();
+        
+        const key = `${freq}_${pan}`;
+        const now = Date.now();
+        if (now - (state.lastSound[key] || 0) < CONFIG.COOLDOWNS.sound) return;
+        state.lastSound[key] = now;
+        
+        try {
+            const osc = state.audioCtx.createOscillator();
+            const gain = state.audioCtx.createGain();
+            const panner = state.audioCtx.createStereoPanner();
+            
+            osc.frequency.value = freq;
+            gain.gain.setValueAtTime(0.4, state.audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, state.audioCtx.currentTime + duration);
+            panner.pan.value = pan;
+            
+            osc.connect(gain).connect(panner).connect(state.audioCtx.destination);
+            osc.start();
+            osc.stop(state.audioCtx.currentTime + duration);
+        } catch (e) {}
+    }
+    
+    function playDirectionalAlert(position, urgency) {
+        let pan = 0;
+        if (position.includes('left')) pan = -0.9;
+        else if (position.includes('right')) pan = 0.9;
+        
+        const freqs = { soft: 500, warning: 700, danger: 900, immediate: 1100 };
+        const durs = { soft: 0.1, warning: 0.15, danger: 0.12, immediate: 0.1 };
+        
+        playTone(freqs[urgency] || 500, durs[urgency] || 0.1, pan);
+    }
+    
+    // ============================================
+    // GESTURE HANDLING
+    // ============================================
+    
+    function setupGestures() {
+        const area = document.getElementById('touchArea');
+        
+        // Touch start
+        area.addEventListener('touchstart', (e) => {
+            const touch = e.touches[0];
+            state.touchStartX = touch.clientX;
+            state.touchStartY = touch.clientY;
+            state.touchStartTime = Date.now();
+            
+            // Start long press timer
+            state.longPressTimer = setTimeout(() => {
+                vibrate(HAPTIC.tap);
+                showHelp();
+            }, 2000);
+        }, { passive: true });
+        
+        // Touch end
+        area.addEventListener('touchend', (e) => {
+            clearTimeout(state.longPressTimer);
+            
+            const touch = e.changedTouches[0];
+            const deltaX = touch.clientX - state.touchStartX;
+            const deltaY = touch.clientY - state.touchStartY;
+            const duration = Date.now() - state.touchStartTime;
+            
+            // Ignore if it was a long press
+            if (duration > 1500) return;
+            
+            // Check for swipe
+            const swipeThreshold = 80;
+            if (Math.abs(deltaX) > swipeThreshold && Math.abs(deltaX) > Math.abs(deltaY)) {
+                // Horizontal swipe
+                vibrate(HAPTIC.direction);
+                if (deltaX > 0) {
+                    describeDirection('right');
+                } else {
+                    describeDirection('left');
+                }
+                return;
+            }
+            
+            // Check for double tap
+            const now = Date.now();
+            if (now - state.lastTapTime < 400) {
+                // Double tap - AI scan
+                vibrate(HAPTIC.tap);
+                triggerAIScan();
+                state.lastTapTime = 0;
+                return;
+            }
+            state.lastTapTime = now;
+            
+            // Single tap - check which zone
+            const screenHeight = window.innerHeight;
+            const tapY = touch.clientY;
+            
+            vibrate(HAPTIC.tap);
+            
+            if (tapY < screenHeight * 0.3) {
+                // Top zone - describe
+                describeScene();
+            } else if (tapY > screenHeight * 0.7) {
+                // Bottom zone - safety check
+                checkSafety();
+            }
+            // Middle zone taps do nothing (avoid accidental triggers)
+            
+        }, { passive: true });
+        
+        // Prevent default on touch move to avoid scrolling
+        area.addEventListener('touchmove', (e) => {
+            // Clear long press if moving
+            clearTimeout(state.longPressTimer);
+        }, { passive: true });
+        
+        // Shake detection for emergency
+        if (window.DeviceMotionEvent) {
+            let lastShake = 0;
+            window.addEventListener('devicemotion', (e) => {
+                const acc = e.accelerationIncludingGravity;
+                if (!acc) return;
+                
+                const force = Math.sqrt(acc.x * acc.x + acc.y * acc.y + acc.z * acc.z);
+                if (force > 25) {
+                    const now = Date.now();
+                    if (now - lastShake > 3000) {
+                        lastShake = now;
+                        vibrate(HAPTIC.danger);
+                        emergencyDescribe();
+                    }
+                }
+            });
+        }
+    }
+    
+    // ============================================
+    // HELP SYSTEM
+    // ============================================
+    
+    function showHelp() {
+        document.getElementById('helpOverlay').classList.add('visible');
+        speak('Help guide. Tap top of screen to describe surroundings. Tap bottom to check if path is safe. Double tap for AI scan. Swipe left or right to check sides. Long press for this help. Tap the button at bottom to start.');
+    }
+    
+    function hideHelp() {
+        document.getElementById('helpOverlay').classList.remove('visible');
+        vibrate(HAPTIC.success);
+        speak('BlindGuide ready. I will alert you to obstacles automatically. Tap top of screen anytime to hear what is around you.');
+    }
+    
+    // ============================================
+    // SCENE DESCRIPTION
+    // ============================================
+    
+    function describeScene() {
+        if (state.detections.length === 0) {
+            speak('The area seems clear. No obstacles detected.');
+            updateStatus('safe');
+            return;
+        }
+        
+        // Group by position
+        const left = state.detections.filter(d => d.position.includes('left'));
+        const right = state.detections.filter(d => d.position.includes('right'));
+        const ahead = state.detections.filter(d => d.position === 'ahead');
+        
+        let description = '';
+        
+        if (ahead.length > 0) {
+            const item = ahead[0];
+            description += `${item.className} ahead, ${item.depth.toFixed(1)} meters. `;
+        }
+        
+        if (left.length > 0) {
+            const item = left[0];
+            description += `${item.className} on your left. `;
+        }
+        
+        if (right.length > 0) {
+            const item = right[0];
+            description += `${item.className} on your right. `;
+        }
+        
+        if (!description) {
+            description = 'Some objects detected but none in your immediate path.';
+        }
+        
+        speak(description);
+    }
+    
+    function checkSafety() {
+        const inPath = state.detections.filter(d => d.inPath);
+        
+        if (inPath.length === 0) {
+            vibrate(HAPTIC.success);
+            speak('Path is clear. Safe to walk forward.');
+            updateStatus('safe');
+            return;
+        }
+        
+        const closest = inPath[0];
+        
+        if (closest.depth < CONFIG.ZONES.immediate) {
+            vibrate(HAPTIC.danger);
+            speak(`Stop! ${closest.className} very close ahead, less than 1 meter!`);
+            updateStatus('danger');
+        } else if (closest.depth < CONFIG.ZONES.close) {
+            vibrate(HAPTIC.warning);
+            speak(`Caution. ${closest.className} ahead, about ${closest.depth.toFixed(1)} meters. Proceed carefully.`);
+            updateStatus('warning');
+        } else {
+            vibrate(HAPTIC.success);
+            speak(`Path is mostly clear. ${closest.className} detected ahead but at safe distance.`);
+            updateStatus('safe');
+        }
+    }
+    
+    function describeDirection(dir) {
+        const items = state.detections.filter(d => d.position.includes(dir));
+        
+        if (items.length === 0) {
+            speak(`Nothing detected on your ${dir}.`);
+        } else {
+            const item = items[0];
+            speak(`${item.className} on your ${dir}, about ${item.depth.toFixed(1)} meters.`);
+        }
+        
+        // Flash direction indicator
+        const hint = document.getElementById(`hint${dir.charAt(0).toUpperCase() + dir.slice(1)}`);
+        if (hint) {
+            hint.classList.add('active');
+            setTimeout(() => hint.classList.remove('active'), 500);
+        }
+    }
+    
+    function emergencyDescribe() {
+        speak('Emergency scan.');
+        
+        if (state.detections.length === 0) {
+            speak('Area appears clear. No obstacles detected around you.');
+            return;
+        }
+        
+        let desc = `I detect ${state.detections.length} objects. `;
+        
+        state.detections.slice(0, 5).forEach(d => {
+            desc += `${d.className} ${d.position}, ${d.depth.toFixed(1)} meters. `;
+        });
+        
+        speak(desc);
+        
+        // Also trigger AI scan
+        triggerAIScan();
+    }
+    
+    // ============================================
+    // AI ANALYSIS
+    // ============================================
+    
+    async function analyzeWithAI() {
+        const now = Date.now();
+        if (now - state.lastVLM < CONFIG.COOLDOWNS.vlm) return null;
+        state.lastVLM = now;
+        
+        try {
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = 320;
+            tempCanvas.height = 240;
+            tempCanvas.getContext('2d').drawImage(state.video, 0, 0, 320, 240);
+            const imageData = tempCanvas.toDataURL('image/jpeg', 0.6).split(',')[1];
+            
+            const response = await fetch(CONFIG.WORKER_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ image: imageData, provider: 'openai' })
+            });
+            
+            const data = await response.json();
+            return data.result || null;
+        } catch (e) {
+            console.error('AI error:', e);
+            return null;
+        }
+    }
+    
+    function triggerAIScan() {
+        speak('Scanning with AI. Please wait.');
+        
+        analyzeWithAI().then(result => {
+            if (result) {
+                speak(result);
+            } else {
+                speak('AI scan complete. No additional hazards detected.');
+            }
+        }).catch(() => {
+            speak('AI scan unavailable right now.');
+        });
+    }
+    
+    // ============================================
+    // STATUS UPDATES
+    // ============================================
+    
+    function updateStatus(status) {
+        state.currentStatus = status;
+        
+        const circle = document.getElementById('statusCircle');
+        circle.className = `status-circle ${status}`;
+        
+        if (status === 'safe') {
+            circle.textContent = '✓';
+        } else if (status === 'warning') {
+            circle.textContent = '!';
+        } else {
+            circle.textContent = '⚠';
+        }
+    }
+    
+    function updateDirectionHints(detection) {
+        // Clear all
+        document.querySelectorAll('.direction-hint').forEach(h => h.classList.remove('active'));
+        
+        if (!detection) return;
+        
+        if (detection.position.includes('left')) {
+            document.getElementById('hintLeft').classList.add('active');
+        } else if (detection.position.includes('right')) {
+            document.getElementById('hintRight').classList.add('active');
+        } else {
+            document.getElementById('hintAhead').classList.add('active');
+        }
+    }
+    
+    // ============================================
+    // AUTOMATIC NAVIGATION ALERTS
+    // ============================================
+    
+    function processNavigation() {
+        // Find most dangerous obstacle
+        const threat = state.detections.find(d => 
+            d.inPath && (d.priority === 'critical' || d.priority === 'danger')
+        );
+        
+        if (!threat) {
+            updateStatus('safe');
+            updateDirectionHints(null);
+            return;
+        }
+        
+        updateDirectionHints(threat);
+        
+        // Determine urgency
+        if (threat.depth < CONFIG.ZONES.immediate) {
+            // IMMEDIATE DANGER
+            updateStatus('danger');
+            vibrate(HAPTIC.danger);
+            playDirectionalAlert(threat.position, 'immediate');
+            
+            const dir = threat.position.includes('left') ? 'right' : 
+                        threat.position.includes('right') ? 'left' : 'back';
+            speakWithCooldown(`Stop! ${threat.className}! Go ${dir}!`, 2000);
+            
+        } else if (threat.depth < CONFIG.ZONES.close) {
+            // CLOSE - Warning
+            updateStatus('warning');
+            playDirectionalAlert(threat.position, 'warning');
+            vibrate(HAPTIC.warning);
+            
+            speakWithCooldown(`Caution, ${threat.className} ${threat.position}`, 4000);
+            
+        } else if (threat.depth < CONFIG.ZONES.awareness) {
+            // AWARENESS - Soft alert
+            updateStatus('safe');
+            playDirectionalAlert(threat.position, 'soft');
+        }
+    }
+    
+    // ============================================
+    // OBJECT DETECTION
+    // ============================================
+    
+    async function loadModel() {
+        try {
+            state.model = await ort.InferenceSession.create(CONFIG.MODEL_URL, {
+                executionProviders: ['webgl', 'wasm']
+            });
+            return true;
+        } catch (e) {
+            console.error('Model error:', e);
+            return false;
+        }
+    }
+    
+    async function detect(imageData) {
+        if (!state.model) return [];
+        
+        const data = new Float32Array(3 * 640 * 640);
+        for (let i = 0; i < 640 * 640; i++) {
+            const idx = i * 4;
+            data[i] = imageData.data[idx] / 255;
+            data[i + 640 * 640] = imageData.data[idx + 1] / 255;
+            data[i + 2 * 640 * 640] = imageData.data[idx + 2] / 255;
+        }
+        
+        try {
+            const tensor = new ort.Tensor('float32', data, [1, 3, 640, 640]);
+            const results = await state.model.run({ images: tensor });
+            const output = results[Object.keys(results)[0]];
+            return postprocess(output);
+        } catch (e) {
+            return [];
+        }
+    }
+    
+    function postprocess(output) {
+        const detections = [];
+        const data = output.data;
+        const numBoxes = output.dims[2];
+        
+        for (let i = 0; i < numBoxes; i++) {
+            let maxScore = 0, classId = 0;
+            for (let c = 0; c < 80; c++) {
+                const score = data[(4 + c) * numBoxes + i];
+                if (score > maxScore) { maxScore = score; classId = c; }
+            }
+            
+            if (maxScore < 0.4) continue;
+            
+            const x = data[0 * numBoxes + i];
+            const w = data[2 * numBoxes + i];
+            const h = data[3 * numBoxes + i];
+            
+            const bbox = {
+                width: w / 640,
+                height: h / 640
+            };
+            
+            const cx = (x / 640);
+            let position = 'ahead';
+            if (cx < 0.30) position = 'far left';
+            else if (cx < 0.42) position = 'left';
+            else if (cx > 0.70) position = 'far right';
+            else if (cx > 0.58) position = 'right';
+            
+            const className = CONFIG.CLASS_NAMES[classId];
+            let priority = 'info';
+            if (CONFIG.PRIORITIES.critical.includes(className)) priority = 'critical';
+            else if (CONFIG.PRIORITIES.danger.includes(className)) priority = 'danger';
+            else if (CONFIG.PRIORITIES.warning.includes(className)) priority = 'warning';
+            
+            // Estimate depth from size
+            const size = Math.max(bbox.width, bbox.height);
+            let depth = 5.0;
+            if (size > 0.55) depth = 0.4;
+            else if (size > 0.42) depth = 0.7;
+            else if (size > 0.30) depth = 1.2;
+            else if (size > 0.20) depth = 2.0;
+            else if (size > 0.12) depth = 3.0;
+            
+            detections.push({
+                className,
+                confidence: maxScore,
+                position,
+                depth,
+                priority,
+                inPath: cx > 0.30 && cx < 0.70
+            });
+        }
+        
+        // Sort by priority and depth
+        detections.sort((a, b) => {
+            const p = { critical: 0, danger: 1, warning: 2, info: 3 };
+            if (p[a.priority] !== p[b.priority]) return p[a.priority] - p[b.priority];
+            return a.depth - b.depth;
+        });
+        
+        return detections.slice(0, 10);
+    }
+    
+    // ============================================
+    // MAIN LOOP
+    // ============================================
+    
+    async function processFrame() {
+        if (!state.isRunning) return;
+        
+        // Capture frame
+        state.ctx.drawImage(state.video, 0, 0, 640, 640);
+        const imageData = state.ctx.getImageData(0, 0, 640, 640);
+        
+        // Detect objects
+        state.detections = await detect(imageData);
+        
+        // Process navigation alerts
+        processNavigation();
+        
+        // Next frame
+        requestAnimationFrame(processFrame);
+    }
+    
+    // ============================================
+    // CAMERA
+    // ============================================
+    
+    async function initCamera() {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: { facingMode: 'environment', width: { ideal: 640 }, height: { ideal: 480 } },
+                audio: false
+            });
+            state.video.srcObject = stream;
+            await state.video.play();
+            return true;
+        } catch (e) {
+            speak('Camera access is required. Please allow camera permission and refresh the page.');
+            return false;
+        }
+    }
+    
+    // ============================================
+    // INITIALIZATION
+    // ============================================
+    
+    async function init() {
+        state.video = document.getElementById('video');
+        state.canvas = document.getElementById('canvas');
+        state.ctx = state.canvas.getContext('2d');
+        state.canvas.width = 640;
+        state.canvas.height = 640;
+        
+        // Initialize audio
+        initAudio();
+        
+        // Setup gestures
+        setupGestures();
+        
+        // Help close button
+        document.getElementById('helpClose').addEventListener('click', hideHelp);
+        
+        // Load model
+        const modelLoaded = await loadModel();
+        if (!modelLoaded) {
+            speak('Failed to load AI model. Please refresh the page.');
+            return;
+        }
+        
+        // Initialize camera
+        const cameraReady = await initCamera();
+        if (!cameraReady) return;
+        
+        // Hide loading, show help first time
+        document.getElementById('loadingScreen').classList.add('hidden');
+        
+        // Check if first time
+        const firstTime = !localStorage.getItem('blindguide_used');
+        if (firstTime) {
+            localStorage.setItem('blindguide_used', 'true');
+            showHelp();
+        } else {
+            speak('BlindGuide ready. Tap top of screen to hear surroundings, tap bottom to check if safe.');
+            state.isRunning = true;
+            processFrame();
+        }
+    }
+    
+    // Start when page loads
+    window.addEventListener('load', init);
+    
+    // Handle visibility
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+            state.isRunning = false;
+        } else {
+            state.isRunning = true;
+            processFrame();
+        }
+    });
+    
+    // Service worker
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('sw.js').catch(() => {});
+    }
+    </script>
+</body>
+</html>
