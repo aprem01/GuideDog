@@ -1,0 +1,1391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#0a0a0f">
+    <meta name="description" content="AI-powered navigation assistant for visually impaired users">
+    
+    <title>BlindGuide AI</title>
+    
+    <link rel="manifest" href="manifest.json">
+    <link rel="apple-touch-icon" href="icon-192.png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+    
+    <style>
+        :root {
+            --bg-primary: #0a0a0f;
+            --bg-secondary: #12121a;
+            --bg-card: #1a1a24;
+            --bg-input: #252530;
+            --text-primary: #ffffff;
+            --text-secondary: #8888aa;
+            --text-muted: #555566;
+            --accent-safe: #00ff88;
+            --accent-warning: #ffaa00;
+            --accent-danger: #ff4444;
+            --accent-info: #4488ff;
+            --accent-purple: #8844ff;
+            --border-color: #333344;
+        }
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+            -webkit-touch-callout: none;
+            -webkit-user-select: none;
+            user-select: none;
+        }
+        
+        html, body {
+            height: 100%;
+            overflow: hidden;
+            font-family: 'JetBrains Mono', monospace;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+        }
+        
+        .app {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            height: 100dvh;
+        }
+        
+        /* Camera */
+        .camera-container {
+            flex: 1;
+            position: relative;
+            background: #000;
+            overflow: hidden;
+        }
+        
+        #video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        
+        #canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+        
+        /* Status Bar */
+        .status-bar {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            padding: 10px 12px;
+            padding-top: max(10px, env(safe-area-inset-top));
+            background: linear-gradient(to bottom, rgba(0,0,0,0.85), rgba(0,0,0,0.4), transparent);
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            z-index: 10;
+            gap: 8px;
+        }
+        
+        .status-left, .status-right {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        
+        .status-badge {
+            padding: 5px 10px;
+            border-radius: 16px;
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            white-space: nowrap;
+        }
+        
+        .badge-walking { background: var(--accent-info); color: #000; }
+        .badge-stationary { background: var(--accent-safe); color: #000; }
+        .badge-depth { background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.2); }
+        .badge-ai { background: rgba(136,68,255,0.3); border: 1px solid var(--accent-purple); font-size: 9px; }
+        .badge-ai.active { background: var(--accent-purple); color: #fff; }
+        
+        /* Alert Banner */
+        .alert-banner {
+            position: absolute;
+            top: 70px;
+            left: 12px;
+            right: 12px;
+            padding: 14px 16px;
+            border-radius: 12px;
+            font-size: 15px;
+            font-weight: 600;
+            text-align: center;
+            z-index: 20;
+            opacity: 0;
+            transform: translateY(-20px) scale(0.95);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            pointer-events: none;
+        }
+        
+        .alert-banner.visible {
+            opacity: 1;
+            transform: translateY(0) scale(1);
+        }
+        
+        .alert-banner.danger {
+            background: linear-gradient(135deg, #ff4444, #cc2222);
+            color: #fff;
+            box-shadow: 0 4px 20px rgba(255,68,68,0.4);
+            animation: pulse-danger 0.4s ease infinite;
+        }
+        
+        .alert-banner.warning {
+            background: linear-gradient(135deg, #ffaa00, #cc8800);
+            color: #000;
+        }
+        
+        .alert-banner.info {
+            background: linear-gradient(135deg, #4488ff, #2266dd);
+            color: #fff;
+        }
+        
+        @keyframes pulse-danger {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.02); }
+        }
+        
+        /* VLM Insight */
+        .vlm-insight {
+            position: absolute;
+            bottom: 200px;
+            left: 12px;
+            right: 12px;
+            padding: 12px 14px;
+            background: rgba(136, 68, 255, 0.25);
+            border: 1px solid var(--accent-purple);
+            border-radius: 12px;
+            font-size: 13px;
+            line-height: 1.4;
+            z-index: 15;
+            opacity: 0;
+            transform: translateY(10px);
+            transition: all 0.3s ease;
+        }
+        
+        .vlm-insight.visible {
+            opacity: 1;
+            transform: translateY(0);
+        }
+        
+        .vlm-insight-label {
+            font-size: 10px;
+            font-weight: 700;
+            color: var(--accent-purple);
+            margin-bottom: 4px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        
+        /* Direction Indicators */
+        .direction-indicators {
+            position: absolute;
+            bottom: 210px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 16px;
+            z-index: 15;
+        }
+        
+        .direction-arrow {
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            background: rgba(0,0,0,0.5);
+            border: 2px solid rgba(255,255,255,0.2);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 22px;
+            opacity: 0.3;
+            transition: all 0.2s ease;
+        }
+        
+        .direction-arrow.active {
+            opacity: 1;
+            border-color: var(--accent-warning);
+            background: rgba(255, 170, 0, 0.25);
+        }
+        
+        .direction-arrow.danger {
+            border-color: var(--accent-danger);
+            background: rgba(255, 68, 68, 0.3);
+            animation: pulse-danger 0.3s ease infinite;
+        }
+        
+        /* Control Panel */
+        .control-panel {
+            background: var(--bg-secondary);
+            padding: 14px;
+            padding-bottom: max(14px, env(safe-area-inset-bottom));
+            border-top: 1px solid var(--border-color);
+        }
+        
+        .main-action {
+            width: 100%;
+            padding: 18px;
+            border: none;
+            border-radius: 14px;
+            font-family: inherit;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+        }
+        
+        .main-action.listening {
+            background: linear-gradient(135deg, #4488ff, #6644ff);
+            color: #fff;
+            animation: listening-pulse 1.5s ease infinite;
+        }
+        
+        .main-action.idle {
+            background: var(--bg-card);
+            color: var(--text-primary);
+            border: 2px solid var(--border-color);
+        }
+        
+        @keyframes listening-pulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(68, 136, 255, 0.4); }
+            50% { box-shadow: 0 0 0 15px rgba(68, 136, 255, 0); }
+        }
+        
+        .quick-actions {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 8px;
+        }
+        
+        .quick-btn {
+            padding: 12px 6px;
+            border: none;
+            border-radius: 10px;
+            background: var(--bg-card);
+            color: var(--text-primary);
+            font-family: inherit;
+            font-size: 10px;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 5px;
+            transition: all 0.2s ease;
+        }
+        
+        .quick-btn:active { transform: scale(0.95); }
+        .quick-btn .icon { font-size: 20px; }
+        .quick-btn.active { background: var(--accent-info); color: #000; }
+        
+        /* Settings Modal */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.85);
+            z-index: 100;
+            display: none;
+            align-items: flex-end;
+            backdrop-filter: blur(5px);
+        }
+        
+        .modal-overlay.visible { display: flex; }
+        
+        .modal-content {
+            width: 100%;
+            max-height: 80vh;
+            background: var(--bg-secondary);
+            border-radius: 20px 20px 0 0;
+            overflow-y: auto;
+            animation: slideUp 0.3s ease;
+        }
+        
+        @keyframes slideUp {
+            from { transform: translateY(100%); }
+            to { transform: translateY(0); }
+        }
+        
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px;
+            border-bottom: 1px solid var(--border-color);
+            position: sticky;
+            top: 0;
+            background: var(--bg-secondary);
+        }
+        
+        .modal-title { font-size: 18px; font-weight: 700; }
+        
+        .modal-close {
+            width: 32px;
+            height: 32px;
+            border: none;
+            border-radius: 50%;
+            background: var(--bg-card);
+            color: var(--text-primary);
+            font-size: 18px;
+            cursor: pointer;
+        }
+        
+        .modal-body {
+            padding: 16px 20px;
+            padding-bottom: max(20px, env(safe-area-inset-bottom));
+        }
+        
+        .settings-section { margin-bottom: 24px; }
+        
+        .settings-section-title {
+            font-size: 11px;
+            font-weight: 700;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 12px;
+        }
+        
+        .setting-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 14px 0;
+            border-bottom: 1px solid var(--border-color);
+        }
+        
+        .setting-label { font-size: 14px; font-weight: 500; }
+        .setting-desc { font-size: 11px; color: var(--text-secondary); margin-top: 3px; }
+        
+        .toggle {
+            width: 48px;
+            height: 26px;
+            background: var(--bg-input);
+            border-radius: 13px;
+            position: relative;
+            cursor: pointer;
+            transition: background 0.3s ease;
+            flex-shrink: 0;
+        }
+        
+        .toggle.active { background: var(--accent-info); }
+        
+        .toggle::after {
+            content: '';
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            width: 22px;
+            height: 22px;
+            background: #fff;
+            border-radius: 50%;
+            transition: transform 0.3s ease;
+        }
+        
+        .toggle.active::after { transform: translateX(22px); }
+        
+        .provider-selector {
+            display: flex;
+            gap: 8px;
+            padding: 14px 0;
+        }
+        
+        .provider-btn {
+            flex: 1;
+            padding: 12px;
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            background: var(--bg-card);
+            color: var(--text-secondary);
+            font-family: inherit;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        
+        .provider-btn.active {
+            background: var(--accent-purple);
+            color: #fff;
+            border-color: var(--accent-purple);
+        }
+        
+        /* Loading */
+        .loading-screen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: var(--bg-primary);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 200;
+            transition: opacity 0.5s ease;
+        }
+        
+        .loading-screen.hidden { opacity: 0; pointer-events: none; }
+        
+        .loading-logo {
+            font-size: 72px;
+            margin-bottom: 20px;
+            animation: float 2s ease-in-out infinite;
+        }
+        
+        @keyframes float {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-12px); }
+        }
+        
+        .loading-title {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+        
+        .loading-status {
+            font-size: 13px;
+            color: var(--text-secondary);
+            margin-bottom: 16px;
+        }
+        
+        .loading-progress {
+            width: 220px;
+            height: 4px;
+            background: var(--bg-card);
+            border-radius: 2px;
+            overflow: hidden;
+        }
+        
+        .loading-progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, var(--accent-info), var(--accent-purple));
+            transition: width 0.3s ease;
+        }
+        
+        body.high-contrast { filter: contrast(1.4) saturate(0); }
+    </style>
+</head>
+<body>
+    <!-- Loading -->
+    <div class="loading-screen" id="loadingScreen">
+        <div class="loading-logo">🦮</div>
+        <div class="loading-title">BlindGuide AI</div>
+        <div class="loading-status" id="loadingStatus">Initializing...</div>
+        <div class="loading-progress">
+            <div class="loading-progress-bar" id="loadingProgress" style="width: 0%"></div>
+        </div>
+    </div>
+    
+    <!-- App -->
+    <div class="app">
+        <div class="camera-container">
+            <video id="video" autoplay playsinline muted></video>
+            <canvas id="canvas"></canvas>
+            
+            <div class="status-bar">
+                <div class="status-left">
+                    <span class="status-badge badge-stationary" id="stateBadge">READY</span>
+                    <span class="status-badge badge-depth" id="depthBadge">--</span>
+                </div>
+                <div class="status-right">
+                    <span class="status-badge badge-ai" id="aiBadge">🧠 AI Ready</span>
+                </div>
+            </div>
+            
+            <div class="alert-banner" id="alertBanner"></div>
+            
+            <div class="direction-indicators">
+                <div class="direction-arrow" id="arrowLeft">←</div>
+                <div class="direction-arrow" id="arrowAhead">↑</div>
+                <div class="direction-arrow" id="arrowRight">→</div>
+            </div>
+            
+            <div class="vlm-insight" id="vlmInsight">
+                <div class="vlm-insight-label">🧠 AI Analysis</div>
+                <div id="vlmText"></div>
+            </div>
+        </div>
+        
+        <div class="control-panel">
+            <button class="main-action idle" id="mainAction">
+                <span>🎤</span>
+                <span>Tap to Ask</span>
+            </button>
+            
+            <div class="quick-actions">
+                <button class="quick-btn" id="btnDescribe">
+                    <span class="icon">👁️</span>
+                    <span>Describe</span>
+                </button>
+                <button class="quick-btn" id="btnSafe">
+                    <span class="icon">✓</span>
+                    <span>Safe?</span>
+                </button>
+                <button class="quick-btn active" id="btnNav">
+                    <span class="icon">🧭</span>
+                    <span>Nav</span>
+                </button>
+                <button class="quick-btn" id="btnAI">
+                    <span class="icon">🧠</span>
+                    <span>AI Scan</span>
+                </button>
+                <button class="quick-btn" id="btnSettings">
+                    <span class="icon">⚙️</span>
+                    <span>Settings</span>
+                </button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Settings Modal -->
+    <div class="modal-overlay" id="settingsModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <span class="modal-title">⚙️ Settings</span>
+                <button class="modal-close" id="closeSettings">×</button>
+            </div>
+            
+            <div class="modal-body">
+                <div class="settings-section">
+                    <div class="settings-section-title">Feedback</div>
+                    
+                    <div class="setting-item">
+                        <div>
+                            <div class="setting-label">Voice Alerts</div>
+                            <div class="setting-desc">Speak obstacles and directions</div>
+                        </div>
+                        <div class="toggle active" id="toggleVoice"></div>
+                    </div>
+                    
+                    <div class="setting-item">
+                        <div>
+                            <div class="setting-label">Vibration Feedback</div>
+                            <div class="setting-desc">Haptic feedback for obstacles</div>
+                        </div>
+                        <div class="toggle active" id="toggleVibration"></div>
+                    </div>
+                    
+                    <div class="setting-item">
+                        <div>
+                            <div class="setting-label">Sound Cues</div>
+                            <div class="setting-desc">Directional audio hints</div>
+                        </div>
+                        <div class="toggle active" id="toggleSound"></div>
+                    </div>
+                </div>
+                
+                <div class="settings-section">
+                    <div class="settings-section-title">AI Scene Analysis</div>
+                    
+                    <div class="setting-item">
+                        <div>
+                            <div class="setting-label">Enable AI Analysis</div>
+                            <div class="setting-desc">Detects stairs, doors, wet floors</div>
+                        </div>
+                        <div class="toggle active" id="toggleVLM"></div>
+                    </div>
+                    
+                    <div class="setting-item">
+                        <div>
+                            <div class="setting-label">Auto-Analyze</div>
+                            <div class="setting-desc">Scan every 5 sec when walking</div>
+                        </div>
+                        <div class="toggle active" id="toggleAutoVLM"></div>
+                    </div>
+                    
+                    <div class="settings-section-title" style="margin-top: 16px;">AI Provider</div>
+                    <div class="provider-selector">
+                        <button class="provider-btn active" id="providerOpenAI">🤖 GPT-4o</button>
+                        <button class="provider-btn" id="providerAnthropic">🧠 Claude</button>
+                    </div>
+                </div>
+                
+                <div class="settings-section">
+                    <div class="settings-section-title">Accessibility</div>
+                    
+                    <div class="setting-item">
+                        <div>
+                            <div class="setting-label">High Contrast Mode</div>
+                            <div class="setting-desc">For low vision users</div>
+                        </div>
+                        <div class="toggle" id="toggleContrast"></div>
+                    </div>
+                    
+                    <div class="setting-item">
+                        <div>
+                            <div class="setting-label">Use Rear Camera</div>
+                            <div class="setting-desc">Better for navigation</div>
+                        </div>
+                        <div class="toggle active" id="toggleRearCamera"></div>
+                    </div>
+                </div>
+                
+                <div class="settings-section">
+                    <div class="settings-section-title">About</div>
+                    <div style="padding: 14px 0; color: var(--text-secondary); font-size: 12px; line-height: 1.6;">
+                        <strong style="color: var(--text-primary);">BlindGuide AI v2.0</strong><br><br>
+                        AI-powered navigation for visually impaired users.<br><br>
+                        ✅ YOLO object detection<br>
+                        ✅ Depth estimation<br>
+                        ✅ Spatial audio<br>
+                        ✅ GPT-4o & Claude AI analysis<br>
+                        ✅ Voice commands<br><br>
+                        Made with ❤️ for accessibility.
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.16.3/dist/ort.min.js"></script>
+    
+    <script>
+    // ============================================
+    // CONFIGURATION
+    // ============================================
+    
+    const CONFIG = {
+        // YOUR CLOUDFLARE WORKER URL
+        WORKER_URL: "https://guidedog.kpremks.workers.dev",
+        
+        MODEL_URL: "https://huggingface.co/nickmuchi/yolov11n-onnx/resolve/main/yolov11n.onnx",
+        INPUT_SIZE: 640,
+        CONFIDENCE_THRESHOLD: 0.40,
+        
+        ZONES: { immediate: 0.8, close: 1.5, awareness: 3.0 },
+        COOLDOWNS: { voice: 8000, vlm: 5000, sound: 1200, vibration: 800, alert: 3000 },
+        
+        PRIORITIES: {
+            critical: ["car", "bus", "truck", "motorcycle", "bicycle", "train"],
+            danger: ["person", "dog", "cat"],
+            warning: ["chair", "bench", "dining table", "bed", "couch", "fire hydrant", 
+                      "potted plant", "suitcase", "toilet", "refrigerator", "backpack"],
+        },
+        
+        CLASS_NAMES: [
+            "person","bicycle","car","motorcycle","airplane","bus","train","truck",
+            "boat","traffic light","fire hydrant","stop sign","parking meter","bench",
+            "bird","cat","dog","horse","sheep","cow","elephant","bear","zebra","giraffe",
+            "backpack","umbrella","handbag","tie","suitcase","frisbee","skis","snowboard",
+            "sports ball","kite","baseball bat","baseball glove","skateboard","surfboard",
+            "tennis racket","bottle","wine glass","cup","fork","knife","spoon","bowl",
+            "banana","apple","sandwich","orange","broccoli","carrot","hot dog","pizza",
+            "donut","cake","chair","couch","potted plant","bed","dining table","toilet",
+            "tv","laptop","mouse","remote","keyboard","cell phone","microwave","oven",
+            "toaster","sink","refrigerator","book","clock","vase","scissors","teddy bear",
+            "hair drier","toothbrush"
+        ]
+    };
+    
+    // ============================================
+    // STATE
+    // ============================================
+    
+    const state = {
+        model: null,
+        video: null,
+        canvas: null,
+        ctx: null,
+        isRunning: false,
+        navEnabled: true,
+        userState: 'stationary',
+        useRearCamera: true,
+        
+        settings: {
+            voice: true,
+            vibration: true,
+            sound: true,
+            vlm: true,
+            autoVLM: true,
+            contrast: false,
+            provider: 'openai'
+        },
+        
+        lastVoice: 0,
+        lastVLM: 0,
+        lastSound: {},
+        lastVibration: 0,
+        lastAlert: {},
+        
+        prevFrame: null,
+        motionHistory: [],
+        detections: [],
+        audioCtx: null
+    };
+    
+    // ============================================
+    // AUDIO
+    // ============================================
+    
+    function initAudio() {
+        try {
+            state.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        } catch (e) {}
+    }
+    
+    function resumeAudio() {
+        if (state.audioCtx?.state === 'suspended') state.audioCtx.resume();
+    }
+    
+    function playTone(freq, dur, pan = 0, vol = 0.3) {
+        if (!state.audioCtx || !state.settings.sound) return;
+        resumeAudio();
+        
+        const now = Date.now();
+        const key = `t${Math.round(pan*10)}`;
+        if (now - (state.lastSound[key] || 0) < CONFIG.COOLDOWNS.sound) return;
+        state.lastSound[key] = now;
+        
+        try {
+            const osc = state.audioCtx.createOscillator();
+            const gain = state.audioCtx.createGain();
+            const panner = state.audioCtx.createStereoPanner();
+            
+            osc.frequency.value = freq;
+            gain.gain.setValueAtTime(vol, state.audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, state.audioCtx.currentTime + dur);
+            panner.pan.value = Math.max(-1, Math.min(1, pan));
+            
+            osc.connect(gain).connect(panner).connect(state.audioCtx.destination);
+            osc.start();
+            osc.stop(state.audioCtx.currentTime + dur);
+        } catch (e) {}
+    }
+    
+    function playDirectionalSound(pos, urgency = 'soft') {
+        if (!state.settings.sound) return;
+        const freqs = { soft: 550, close: 750, urgent: 950, immediate: 1150 };
+        const durs = { soft: 0.08, close: 0.12, urgent: 0.10, immediate: 0.08 };
+        const vols = { soft: 0.15, close: 0.25, urgent: 0.35, immediate: 0.45 };
+        
+        let pan = 0;
+        if (pos.includes('left')) pan = -0.85;
+        else if (pos.includes('right')) pan = 0.85;
+        
+        playTone(freqs[urgency] || 550, durs[urgency] || 0.1, pan, vols[urgency] || 0.3);
+    }
+    
+    // ============================================
+    // VIBRATION
+    // ============================================
+    
+    function vibrate(pattern) {
+        if (!state.settings.vibration || !navigator.vibrate) return;
+        const now = Date.now();
+        if (now - state.lastVibration < CONFIG.COOLDOWNS.vibration) return;
+        state.lastVibration = now;
+        try { navigator.vibrate(pattern); } catch (e) {}
+    }
+    
+    // ============================================
+    // SPEECH
+    // ============================================
+    
+    function speak(text, priority = 'normal') {
+        if (!state.settings.voice || !text) return;
+        const now = Date.now();
+        if (priority !== 'critical' && now - state.lastVoice < CONFIG.COOLDOWNS.voice) return;
+        
+        try {
+            speechSynthesis.cancel();
+            const u = new SpeechSynthesisUtterance(text);
+            u.rate = 1.1;
+            speechSynthesis.speak(u);
+            state.lastVoice = now;
+        } catch (e) {}
+    }
+    
+    // ============================================
+    // SPEECH RECOGNITION
+    // ============================================
+    
+    let recognition = null;
+    
+    function initSpeechRecognition() {
+        try {
+            const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (!SR) return;
+            
+            recognition = new SR();
+            recognition.continuous = false;
+            recognition.lang = 'en-US';
+            
+            recognition.onresult = (e) => {
+                handleVoiceCommand(e.results[0][0].transcript.toLowerCase());
+            };
+            recognition.onend = () => updateMainButton(false);
+            recognition.onerror = () => updateMainButton(false);
+        } catch (e) {}
+    }
+    
+    function startListening() {
+        resumeAudio();
+        if (!recognition) { speak('Voice not available'); return; }
+        updateMainButton(true);
+        try { recognition.start(); } catch (e) { updateMainButton(false); }
+    }
+    
+    function updateMainButton(listening) {
+        const btn = document.getElementById('mainAction');
+        btn.className = `main-action ${listening ? 'listening' : 'idle'}`;
+        btn.innerHTML = listening ? '<span>🎤</span><span>Listening...</span>' : '<span>🎤</span><span>Tap to Ask</span>';
+    }
+    
+    function handleVoiceCommand(t) {
+        if (t.includes('describe') || t.includes('around') || t.includes('see')) describeScene();
+        else if (t.includes('safe') || t.includes('clear')) checkSafety();
+        else if (t.includes('left')) describeDirection('left');
+        else if (t.includes('right')) describeDirection('right');
+        else if (t.includes('scan') || t.includes('ai') || t.includes('analyze')) triggerAIScan();
+        else if (t.includes('stop') || t.includes('pause')) { state.navEnabled = false; speak('Paused'); updateNavBtn(); }
+        else if (t.includes('start') || t.includes('resume')) { state.navEnabled = true; speak('Resumed'); updateNavBtn(); }
+        else describeScene();
+    }
+    
+    // ============================================
+    // AI ANALYSIS (via Cloudflare Worker)
+    // ============================================
+    
+    async function analyzeWithAI(force = false) {
+        if (!state.settings.vlm) return null;
+        
+        const now = Date.now();
+        if (!force && now - state.lastVLM < CONFIG.COOLDOWNS.vlm) return null;
+        state.lastVLM = now;
+        
+        try {
+            // Capture frame
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = 320;
+            tempCanvas.height = 240;
+            tempCanvas.getContext('2d').drawImage(state.video, 0, 0, 320, 240);
+            const imageData = tempCanvas.toDataURL('image/jpeg', 0.6).split(',')[1];
+            
+            // Show analyzing indicator
+            document.getElementById('aiBadge').textContent = '🧠 Analyzing...';
+            document.getElementById('aiBadge').classList.add('active');
+            
+            const response = await fetch(CONFIG.WORKER_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    image: imageData,
+                    provider: state.settings.provider
+                })
+            });
+            
+            const data = await response.json();
+            
+            document.getElementById('aiBadge').textContent = '🧠 AI Ready';
+            document.getElementById('aiBadge').classList.remove('active');
+            
+            if (data.result) {
+                return data.result;
+            } else if (data.error) {
+                console.error('AI error:', data.error);
+            }
+        } catch (e) {
+            console.error('AI request failed:', e);
+            document.getElementById('aiBadge').textContent = '🧠 AI Ready';
+            document.getElementById('aiBadge').classList.remove('active');
+        }
+        
+        return null;
+    }
+    
+    function triggerAIScan() {
+        speak('Analyzing...');
+        analyzeWithAI(true).then(result => {
+            if (result) {
+                showVLMInsight(result);
+                speak(result);
+            } else {
+                speak('Analysis failed');
+            }
+        });
+    }
+    
+    // ============================================
+    // SCENE DESCRIPTION
+    // ============================================
+    
+    function describeScene() {
+        if (state.detections.length === 0) {
+            speak('Area seems clear');
+            return;
+        }
+        const items = state.detections.slice(0, 4).map(d => `${d.className} ${d.position}`);
+        speak('Around you: ' + items.join(', '));
+    }
+    
+    function checkSafety() {
+        const danger = state.detections.find(d => d.inPath && d.depth < CONFIG.ZONES.close);
+        speak(danger ? `Watch out for ${danger.className} ahead` : 'Path seems clear');
+    }
+    
+    function describeDirection(dir) {
+        const item = state.detections.find(d => d.position.includes(dir));
+        speak(item ? `On ${dir}: ${item.className}` : `Nothing on ${dir}`);
+    }
+    
+    // ============================================
+    // MOTION DETECTION
+    // ============================================
+    
+    function detectMotion(imageData) {
+        const d = imageData.data;
+        let sum = 0;
+        for (let i = 0; i < d.length; i += 320) sum += d[i];
+        const avg = sum / (d.length / 320);
+        
+        if (state.prevFrame === null) { state.prevFrame = avg; return 'uncertain'; }
+        
+        const diff = Math.abs(avg - state.prevFrame) / 255;
+        state.prevFrame = avg;
+        
+        state.motionHistory.push(diff);
+        if (state.motionHistory.length > 12) state.motionHistory.shift();
+        if (state.motionHistory.length < 5) return 'uncertain';
+        
+        const avgMotion = state.motionHistory.reduce((a, b) => a + b) / state.motionHistory.length;
+        if (avgMotion > 0.012) return 'walking';
+        if (avgMotion < 0.004) return 'stationary';
+        return state.userState;
+    }
+    
+    // ============================================
+    // DEPTH ESTIMATION
+    // ============================================
+    
+    function estimateDepth(bbox) {
+        const size = Math.max(bbox.width, bbox.height);
+        if (size > 0.55) return 0.4;
+        if (size > 0.42) return 0.7;
+        if (size > 0.30) return 1.2;
+        if (size > 0.20) return 2.0;
+        if (size > 0.12) return 3.0;
+        return 5.0;
+    }
+    
+    // ============================================
+    // OBJECT DETECTION
+    // ============================================
+    
+    async function loadModel() {
+        updateLoading('Loading AI model...', 30);
+        try {
+            state.model = await ort.InferenceSession.create(CONFIG.MODEL_URL, {
+                executionProviders: ['webgl', 'wasm']
+            });
+            return true;
+        } catch (e) {
+            console.error('Model error:', e);
+            return false;
+        }
+    }
+    
+    async function detect(imageData) {
+        if (!state.model) return [];
+        
+        const data = new Float32Array(3 * 640 * 640);
+        for (let i = 0; i < 640 * 640; i++) {
+            const idx = i * 4;
+            data[i] = imageData.data[idx] / 255;
+            data[i + 640 * 640] = imageData.data[idx + 1] / 255;
+            data[i + 2 * 640 * 640] = imageData.data[idx + 2] / 255;
+        }
+        
+        try {
+            const tensor = new ort.Tensor('float32', data, [1, 3, 640, 640]);
+            const results = await state.model.run({ images: tensor });
+            const output = results[Object.keys(results)[0]];
+            return postprocess(output);
+        } catch (e) { return []; }
+    }
+    
+    function postprocess(output) {
+        const detections = [];
+        const data = output.data;
+        const numBoxes = output.dims[2];
+        
+        for (let i = 0; i < numBoxes; i++) {
+            let maxScore = 0, classId = 0;
+            for (let c = 0; c < 80; c++) {
+                const score = data[(4 + c) * numBoxes + i];
+                if (score > maxScore) { maxScore = score; classId = c; }
+            }
+            
+            if (maxScore < CONFIG.CONFIDENCE_THRESHOLD) continue;
+            
+            const x = data[0 * numBoxes + i];
+            const y = data[1 * numBoxes + i];
+            const w = data[2 * numBoxes + i];
+            const h = data[3 * numBoxes + i];
+            
+            const bbox = {
+                x: (x - w / 2) / 640,
+                y: (y - h / 2) / 640,
+                width: w / 640,
+                height: h / 640
+            };
+            
+            const cx = bbox.x + bbox.width / 2;
+            let position = 'ahead';
+            if (cx < 0.30) position = 'far left';
+            else if (cx < 0.42) position = 'left';
+            else if (cx > 0.70) position = 'far right';
+            else if (cx > 0.58) position = 'right';
+            
+            const className = CONFIG.CLASS_NAMES[classId];
+            let priority = 'info';
+            if (CONFIG.PRIORITIES.critical.includes(className)) priority = 'critical';
+            else if (CONFIG.PRIORITIES.danger.includes(className)) priority = 'danger';
+            else if (CONFIG.PRIORITIES.warning.includes(className)) priority = 'warning';
+            
+            detections.push({
+                className,
+                confidence: maxScore,
+                bbox,
+                position,
+                depth: estimateDepth(bbox),
+                priority,
+                inPath: cx > 0.30 && cx < 0.70
+            });
+        }
+        
+        detections.sort((a, b) => {
+            const p = { critical: 0, danger: 1, warning: 2, info: 3 };
+            if (p[a.priority] !== p[b.priority]) return p[a.priority] - p[b.priority];
+            return a.depth - b.depth;
+        });
+        
+        return detections.slice(0, 10);
+    }
+    
+    // ============================================
+    // NAVIGATION
+    // ============================================
+    
+    function advise() {
+        if (!state.navEnabled) return;
+        
+        const obs = state.detections.find(d => d.priority !== 'info' || d.inPath);
+        if (!obs) { clearArrows(); return; }
+        
+        updateArrows(obs);
+        
+        if (state.userState === 'stationary') {
+            if (obs.priority === 'critical' && obs.depth < CONFIG.ZONES.close) {
+                vibrate([150, 80, 150]);
+                const key = `s_${obs.className}`;
+                const now = Date.now();
+                if (now - (state.lastAlert[key] || 0) > CONFIG.COOLDOWNS.alert) {
+                    speak(`Danger! ${obs.className} nearby!`, 'critical');
+                    showAlert(`🚨 ${obs.className.toUpperCase()}!`, 'danger');
+                    state.lastAlert[key] = now;
+                }
+            }
+        } else {
+            if (obs.depth < CONFIG.ZONES.immediate) {
+                playDirectionalSound(obs.position, 'immediate');
+                vibrate([60, 40, 60]);
+                const dir = obs.position.includes('left') ? 'right' : obs.position.includes('right') ? 'left' : 'back';
+                const key = `w_${obs.className}_${obs.position}`;
+                const now = Date.now();
+                if (now - (state.lastAlert[key] || 0) > CONFIG.COOLDOWNS.alert) {
+                    speak(`Go ${dir}!`, 'critical');
+                    showAlert(`⚠️ Go ${dir}!`, 'danger');
+                    state.lastAlert[key] = now;
+                }
+            } else if (obs.depth < CONFIG.ZONES.close) {
+                playDirectionalSound(obs.position, 'close');
+                vibrate([60]);
+            } else if (obs.depth < CONFIG.ZONES.awareness) {
+                playDirectionalSound(obs.position, 'soft');
+            }
+        }
+    }
+    
+    // ============================================
+    // UI
+    // ============================================
+    
+    function updateLoading(text, pct) {
+        document.getElementById('loadingStatus').textContent = text;
+        document.getElementById('loadingProgress').style.width = `${pct}%`;
+    }
+    
+    function hideLoading() {
+        document.getElementById('loadingScreen').classList.add('hidden');
+    }
+    
+    function showAlert(text, type) {
+        const el = document.getElementById('alertBanner');
+        el.textContent = text;
+        el.className = `alert-banner visible ${type}`;
+        setTimeout(() => el.classList.remove('visible'), 3000);
+    }
+    
+    function showVLMInsight(text) {
+        document.getElementById('vlmText').textContent = text;
+        document.getElementById('vlmInsight').classList.add('visible');
+        setTimeout(() => document.getElementById('vlmInsight').classList.remove('visible'), 6000);
+    }
+    
+    function updateStateBadge() {
+        const el = document.getElementById('stateBadge');
+        el.textContent = state.userState === 'walking' ? 'WALKING' : 'STATIONARY';
+        el.className = `status-badge ${state.userState === 'walking' ? 'badge-walking' : 'badge-stationary'}`;
+    }
+    
+    function updateDepthBadge() {
+        const el = document.getElementById('depthBadge');
+        el.textContent = state.detections.length > 0 ? `Closest: ${state.detections[0].depth.toFixed(1)}m` : 'Clear';
+    }
+    
+    function updateNavBtn() {
+        document.getElementById('btnNav').classList.toggle('active', state.navEnabled);
+    }
+    
+    function updateArrows(obs) {
+        document.querySelectorAll('.direction-arrow').forEach(a => a.className = 'direction-arrow');
+        const isDanger = obs.depth < CONFIG.ZONES.immediate;
+        const cls = isDanger ? 'active danger' : 'active';
+        
+        if (obs.position.includes('left')) document.getElementById('arrowLeft').className = `direction-arrow ${cls}`;
+        else if (obs.position.includes('right')) document.getElementById('arrowRight').className = `direction-arrow ${cls}`;
+        else document.getElementById('arrowAhead').className = `direction-arrow ${cls}`;
+    }
+    
+    function clearArrows() {
+        document.querySelectorAll('.direction-arrow').forEach(a => a.className = 'direction-arrow');
+    }
+    
+    function drawDetections() {
+        const ctx = state.ctx;
+        const c = state.canvas;
+        ctx.clearRect(0, 0, c.width, c.height);
+        
+        for (const d of state.detections) {
+            const x = d.bbox.x * c.width;
+            const y = d.bbox.y * c.height;
+            const w = d.bbox.width * c.width;
+            const h = d.bbox.height * c.height;
+            
+            const colors = { critical: '#ff4444', danger: '#ffaa00', warning: '#4488ff', info: '#00ff88' };
+            ctx.strokeStyle = colors[d.priority] || '#00ff88';
+            ctx.lineWidth = d.inPath ? 3 : 2;
+            ctx.strokeRect(x, y, w, h);
+            ctx.fillStyle = ctx.strokeStyle;
+            ctx.font = 'bold 11px JetBrains Mono';
+            ctx.fillText(`${d.className} ${d.depth.toFixed(1)}m`, x + 4, y - 6);
+        }
+    }
+    
+    // ============================================
+    // MAIN LOOP
+    // ============================================
+    
+    async function processFrame() {
+        if (!state.isRunning) return;
+        
+        state.ctx.drawImage(state.video, 0, 0, 640, 640);
+        const imageData = state.ctx.getImageData(0, 0, 640, 640);
+        
+        state.userState = detectMotion(imageData);
+        updateStateBadge();
+        
+        state.detections = await detect(imageData);
+        updateDepthBadge();
+        
+        state.canvas.width = state.video.videoWidth || 640;
+        state.canvas.height = state.video.videoHeight || 480;
+        drawDetections();
+        
+        advise();
+        
+        // Auto AI scan when walking
+        if (state.settings.autoVLM && state.userState === 'walking') {
+            const result = await analyzeWithAI();
+            if (result && !result.toLowerCase().includes('clear')) {
+                showVLMInsight(result);
+                speak(result);
+            }
+        }
+        
+        requestAnimationFrame(processFrame);
+    }
+    
+    // ============================================
+    // CAMERA
+    // ============================================
+    
+    async function initCamera() {
+        updateLoading('Starting camera...', 60);
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: { facingMode: state.useRearCamera ? 'environment' : 'user', width: { ideal: 640 }, height: { ideal: 480 } },
+                audio: false
+            });
+            state.video.srcObject = stream;
+            await state.video.play();
+            state.video.style.transform = state.useRearCamera ? 'none' : 'scaleX(-1)';
+            state.canvas.style.transform = state.useRearCamera ? 'none' : 'scaleX(-1)';
+            return true;
+        } catch (e) {
+            alert('Please allow camera access');
+            return false;
+        }
+    }
+    
+    // ============================================
+    // SETTINGS
+    // ============================================
+    
+    function loadSettings() {
+        try {
+            const s = localStorage.getItem('blindguide_settings');
+            if (s) Object.assign(state.settings, JSON.parse(s));
+        } catch (e) {}
+    }
+    
+    function saveSettings() {
+        try { localStorage.setItem('blindguide_settings', JSON.stringify(state.settings)); } catch (e) {}
+    }
+    
+    function setupUI() {
+        document.getElementById('mainAction').addEventListener('click', startListening);
+        document.getElementById('btnDescribe').addEventListener('click', describeScene);
+        document.getElementById('btnSafe').addEventListener('click', checkSafety);
+        document.getElementById('btnNav').addEventListener('click', () => {
+            state.navEnabled = !state.navEnabled;
+            speak(state.navEnabled ? 'Nav on' : 'Nav off');
+            updateNavBtn();
+        });
+        document.getElementById('btnAI').addEventListener('click', triggerAIScan);
+        document.getElementById('btnSettings').addEventListener('click', () => document.getElementById('settingsModal').classList.add('visible'));
+        document.getElementById('closeSettings').addEventListener('click', () => document.getElementById('settingsModal').classList.remove('visible'));
+        
+        // Toggles
+        const toggles = ['Voice', 'Vibration', 'Sound', 'VLM', 'AutoVLM', 'Contrast', 'RearCamera'];
+        toggles.forEach(name => {
+            const el = document.getElementById(`toggle${name}`);
+            if (!el) return;
+            el.addEventListener('click', () => {
+                const key = name.toLowerCase();
+                if (key === 'rearcamera') {
+                    state.useRearCamera = !el.classList.contains('active');
+                    el.classList.toggle('active');
+                    if (state.video.srcObject) state.video.srcObject.getTracks().forEach(t => t.stop());
+                    initCamera();
+                } else if (key === 'contrast') {
+                    state.settings.contrast = !el.classList.contains('active');
+                    el.classList.toggle('active');
+                    document.body.classList.toggle('high-contrast', state.settings.contrast);
+                    saveSettings();
+                } else if (key === 'autovlm') {
+                    state.settings.autoVLM = !el.classList.contains('active');
+                    el.classList.toggle('active');
+                    saveSettings();
+                } else {
+                    state.settings[key] = !el.classList.contains('active');
+                    el.classList.toggle('active');
+                    saveSettings();
+                }
+            });
+        });
+        
+        // Provider
+        document.getElementById('providerOpenAI').addEventListener('click', () => {
+            state.settings.provider = 'openai';
+            document.getElementById('providerOpenAI').classList.add('active');
+            document.getElementById('providerAnthropic').classList.remove('active');
+            saveSettings();
+        });
+        document.getElementById('providerAnthropic').addEventListener('click', () => {
+            state.settings.provider = 'anthropic';
+            document.getElementById('providerAnthropic').classList.add('active');
+            document.getElementById('providerOpenAI').classList.remove('active');
+            saveSettings();
+        });
+        
+        // Load UI state
+        document.getElementById('toggleVoice')?.classList.toggle('active', state.settings.voice);
+        document.getElementById('toggleVibration')?.classList.toggle('active', state.settings.vibration);
+        document.getElementById('toggleSound')?.classList.toggle('active', state.settings.sound);
+        document.getElementById('toggleVLM')?.classList.toggle('active', state.settings.vlm);
+        document.getElementById('toggleAutoVLM')?.classList.toggle('active', state.settings.autoVLM);
+        document.getElementById('toggleContrast')?.classList.toggle('active', state.settings.contrast);
+        document.getElementById('toggleRearCamera')?.classList.toggle('active', state.useRearCamera);
+        document.getElementById('providerOpenAI')?.classList.toggle('active', state.settings.provider === 'openai');
+        document.getElementById('providerAnthropic')?.classList.toggle('active', state.settings.provider === 'anthropic');
+        document.body.classList.toggle('high-contrast', state.settings.contrast);
+        updateNavBtn();
+    }
+    
+    // ============================================
+    // INIT
+    // ============================================
+    
+    async function init() {
+        state.video = document.getElementById('video');
+        state.canvas = document.getElementById('canvas');
+        state.ctx = state.canvas.getContext('2d');
+        
+        loadSettings();
+        initAudio();
+        initSpeechRecognition();
+        
+        await loadModel();
+        if (!await initCamera()) return;
+        
+        setupUI();
+        
+        updateLoading('Ready!', 100);
+        setTimeout(() => {
+            hideLoading();
+            speak('BlindGuide ready');
+            state.isRunning = true;
+            processFrame();
+        }, 500);
+    }
+    
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('sw.js').catch(() => {});
+    }
+    
+    window.addEventListener('load', init);
+    document.addEventListener('visibilitychange', () => {
+        state.isRunning = !document.hidden;
+        if (!document.hidden) processFrame();
+    });
+    </script>
+</body>
+</html>
