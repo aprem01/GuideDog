@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#000000">
+    <title>BlindGuide</title>
+    <link rel="manifest" href="manifest.json">
+    
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; user-select: none; }
+        html, body { height: 100%; overflow: hidden; background: #000; color: #fff; font-family: -apple-system, sans-serif; }
+        
+        .app { height: 100dvh; display: flex; flex-direction: column; }
+        #video { position: absolute; opacity: 0; pointer-events: none; width: 1px; height: 1px; }
+        
+        .touch-area { flex: 1; display: flex; flex-direction: column; }
+        
+        .zone { flex: 1; display: flex; align-items: center; justify-content: center; }
+        .zone-top { border-bottom: 3px solid #333; }
+        .zone-bottom { border-top: 3px solid #333; }
+        .zone:active { background: #222; }
+        
+        .zone-label { font-size: 24px; font-weight: 700; text-align: center; padding: 20px; opacity: 0.7; }
+        
+        .status-circle {
+            width: 140px; height: 140px; border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 50px; transition: all 0.3s;
+        }
+        .status-circle.safe { background: rgba(0,255,136,0.2); border: 4px solid #0f8; }
+        .status-circle.warning { background: rgba(255,170,0,0.2); border: 4px solid #fa0; animation: pulse 1s infinite; }
+        .status-circle.danger { background: rgba(255,68,68,0.3); border: 4px solid #f44; animation: pulse 0.3s infinite; }
+        
+        @keyframes pulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.05); } }
+        
+        .direction { position: absolute; font-size: 60px; opacity: 0; transition: opacity 0.2s; }
+        .direction.left { left: 15px; top: 50%; transform: translateY(-50%); }
+        .direction.right { right: 15px; top: 50%; transform: translateY(-50%); }
+        .direction.active { opacity: 1; }
+        
+        .loading { position: fixed; inset: 0; background: #000; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 100; transition: opacity 0.5s; }
+        .loading.hidden { opacity: 0; pointer-events: none; }
+        .loading-icon { font-size: 80px; animation: bounce 1s infinite; }
+        @keyframes bounce { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-15px); } }
+        .loading-text { font-size: 20px; margin-top: 20px; }
+        
+        .help { position: fixed; inset: 0; background: rgba(0,0,0,0.95); z-index: 50; display: none; flex-direction: column; padding: 30px 20px; overflow-y: auto; }
+        .help.visible { display: flex; }
+        .help-title { font-size: 28px; font-weight: 700; margin-bottom: 25px; text-align: center; }
+        .help-item { padding: 15px; margin-bottom: 12px; background: #111; border-radius: 12px; border-left: 4px solid #48f; }
+        .help-gesture { font-size: 18px; font-weight: 700; color: #48f; }
+        .help-action { font-size: 14px; color: #aaa; margin-top: 5px; }
+        .help-close { margin-top: 20px; padding: 18px; background: #48f; border: none; border-radius: 12px; color: #fff; font-size: 18px; font-weight: 700; }
+    </style>
+</head>
+<body>
+    <div class="loading" id="loading">
+        <div class="loading-icon">🦮</div>
+        <div class="loading-text" id="loadingText">Starting BlindGuide...</div>
+    </div>
+    
+    <div class="help" id="help">
+        <div class="help-title">How to Use BlindGuide</div>
+        <div class="help-item"><div class="help-gesture">TAP TOP of screen</div><div class="help-action">AI describes what's around you</div></div>
+        <div class="help-item"><div class="help-gesture">TAP BOTTOM of screen</div><div class="help-action">Check if path is safe to walk</div></div>
+        <div class="help-item"><div class="help-gesture">DOUBLE TAP anywhere</div><div class="help-action">Detailed AI scan for stairs, doors</div></div>
+        <div class="help-item"><div class="help-gesture">SWIPE LEFT or RIGHT</div><div class="help-action">Check what's on that side</div></div>
+        <div class="help-item"><div class="help-gesture">HOLD 2 SECONDS</div><div class="help-action">Hear this help guide again</div></div>
+        <button class="help-close" id="helpClose">TAP TO START</button>
+    </div>
+    
+    <div class="app">
+        <video id="video" autoplay playsinline muted></video>
+        
+        <div class="touch-area" id="touchArea">
+            <div class="zone zone-top" id="zoneTop">
+                <div class="zone-label">TAP HERE<br>DESCRIBE AREA</div>
+            </div>
+            <div class="zone zone-middle">
+                <div class="direction left" id="hintLeft">←</div>
+                <div class="direction right" id="hintRight">→</div>
+                <div class="status-circle safe" id="status">✓</div>
+            </div>
+            <div class="zone zone-bottom" id="zoneBottom">
+                <div class="zone-label">TAP HERE<br>IS IT SAFE?</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- TensorFlow.js + COCO-SSD (more reliable than custom ONNX) -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
+    
+    <script>
+    const CONFIG = {
+        WORKER_URL: "https://guidedog.kpremks.workers.dev",
+        ZONES: { immediate: 0.8, close: 1.5, awareness: 3.0 },
+        CRITICAL: ["car", "bus", "truck", "motorcycle", "bicycle", "train"],
+        DANGER: ["person", "dog", "cat", "horse"],
+        WARNING: ["chair", "bench", "couch", "bed", "dining table", "toilet", "refrigerator", "potted plant"]
+    };
+    
+    const state = {
+        model: null,
+        video: null,
+        isRunning: false,
+        detections: [],
+        lastScan: 0,
+        lastVoice: 0,
+        lastVibrate: 0,
+        touchStart: { x: 0, y: 0, time: 0 },
+        lastTap: 0,
+        longPressTimer: null,
+        audioCtx: null
+    };
+    
+    // ========== SPEECH ==========
+    function speak(text, interrupt = true) {
+        if (!text) return;
+        try {
+            if (interrupt) speechSynthesis.cancel();
+            const u = new SpeechSynthesisUtterance(text);
+            u.rate = 1.0;
+            speechSynthesis.speak(u);
+            state.lastVoice = Date.now();
+        } catch (e) {}
+    }
+    
+    // ========== VIBRATION ==========
+    function vibrate(pattern) {
+        const now = Date.now();
+        if (now - state.lastVibrate < 400) return;
+        state.lastVibrate = now;
+        try { navigator.vibrate?.(pattern); } catch (e) {}
+    }
+    
+    // ========== AUDIO ==========
+    function initAudio() {
+        try { state.audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {}
+    }
+    
+    function playTone(freq, dur, pan = 0) {
+        if (!state.audioCtx) return;
+        try {
+            if (state.audioCtx.state === 'suspended') state.audioCtx.resume();
+            const osc = state.audioCtx.createOscillator();
+            const gain = state.audioCtx.createGain();
+            const panner = state.audioCtx.createStereoPanner();
+            osc.frequency.value = freq;
+            gain.gain.setValueAtTime(0.3, state.audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, state.audioCtx.currentTime + dur);
+            panner.pan.value = pan;
+            osc.connect(gain).connect(panner).connect(state.audioCtx.destination);
+            osc.start();
+            osc.stop(state.audioCtx.currentTime + dur);
+        } catch (e) {}
+    }
+    
+    // ========== AI ANALYSIS ==========
+    async function analyzeWithAI(detailed = false) {
+        try {
+            const canvas = document.createElement('canvas');
+            canvas.width = 320;
+            canvas.height = 240;
+            canvas.getContext('2d').drawImage(state.video, 0, 0, 320, 240);
+            const imageData = canvas.toDataURL('image/jpeg', 0.6).split(',')[1];
+            
+            const response = await fetch(CONFIG.WORKER_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ image: imageData, provider: 'openai' })
+            });
+            
+            const data = await response.json();
+            return data.result || null;
+        } catch (e) {
+            return null;
+        }
+    }
+    
+    // ========== OBJECT DETECTION ==========
+    async function detect() {
+        if (!state.model || !state.video) return [];
+        
+        try {
+            const predictions = await state.model.detect(state.video);
+            
+            return predictions.map(p => {
+                const cx = (p.bbox[0] + p.bbox[2] / 2) / state.video.videoWidth;
+                const size = Math.max(p.bbox[2], p.bbox[3]) / Math.max(state.video.videoWidth, state.video.videoHeight);
+                
+                let position = 'ahead';
+                if (cx < 0.33) position = 'left';
+                else if (cx > 0.67) position = 'right';
+                
+                let depth = 5.0;
+                if (size > 0.5) depth = 0.5;
+                else if (size > 0.35) depth = 1.0;
+                else if (size > 0.2) depth = 1.5;
+                else if (size > 0.1) depth = 2.5;
+                else if (size > 0.05) depth = 4.0;
+                
+                let priority = 'info';
+                if (CONFIG.CRITICAL.includes(p.class)) priority = 'critical';
+                else if (CONFIG.DANGER.includes(p.class)) priority = 'danger';
+                else if (CONFIG.WARNING.includes(p.class)) priority = 'warning';
+                
+                return {
+                    name: p.class,
+                    position,
+                    depth,
+                    priority,
+                    inPath: cx > 0.25 && cx < 0.75
+                };
+            }).sort((a, b) => {
+                const p = { critical: 0, danger: 1, warning: 2, info: 3 };
+                return (p[a.priority] - p[b.priority]) || (a.depth - b.depth);
+            });
+        } catch (e) {
+            return [];
+        }
+    }
+    
+    // ========== DESCRIPTIONS ==========
+    async function describeScene() {
+        vibrate([30]);
+        speak('Scanning...');
+        
+        // Try local detection first
+        const localDetections = await detect();
+        
+        // Always also get AI analysis for better description
+        const aiResult = await analyzeWithAI();
+        
+        if (aiResult) {
+            speak(aiResult);
+            return;
+        }
+        
+        if (localDetections.length === 0) {
+            speak('The area appears clear. No obstacles detected.');
+            updateStatus('safe');
+            return;
+        }
+        
+        let desc = '';
+        const ahead = localDetections.filter(d => d.position === 'ahead');
+        const left = localDetections.filter(d => d.position === 'left');
+        const right = localDetections.filter(d => d.position === 'right');
+        
+        if (ahead.length) desc += `${ahead[0].name} ahead, about ${ahead[0].depth.toFixed(1)} meters. `;
+        if (left.length) desc += `${left[0].name} on your left. `;
+        if (right.length) desc += `${right[0].name} on your right. `;
+        
+        speak(desc || 'Some objects detected nearby.');
+    }
+    
+    async function checkSafety() {
+        vibrate([30]);
+        
+        const detections = await detect();
+        const inPath = detections.filter(d => d.inPath);
+        
+        if (inPath.length === 0) {
+            vibrate([50, 30, 50]);
+            speak('Path is clear. Safe to walk forward.');
+            updateStatus('safe');
+            return;
+        }
+        
+        const closest = inPath[0];
+        
+        if (closest.depth < CONFIG.ZONES.immediate) {
+            vibrate([200, 100, 200, 100, 200]);
+            speak(`Stop! ${closest.name} very close! Less than 1 meter ahead!`);
+            updateStatus('danger');
+        } else if (closest.depth < CONFIG.ZONES.close) {
+            vibrate([100, 50, 100]);
+            speak(`Caution. ${closest.name} ahead, about ${closest.depth.toFixed(1)} meters. Proceed carefully.`);
+            updateStatus('warning');
+        } else {
+            vibrate([50, 30, 50]);
+            speak(`Path mostly clear. ${closest.name} detected ahead at safe distance.`);
+            updateStatus('safe');
+        }
+    }
+    
+    async function checkDirection(dir) {
+        vibrate([30]);
+        
+        const detections = await detect();
+        const items = detections.filter(d => d.position === dir);
+        
+        document.getElementById(`hint${dir.charAt(0).toUpperCase() + dir.slice(1)}`).classList.add('active');
+        setTimeout(() => document.getElementById(`hint${dir.charAt(0).toUpperCase() + dir.slice(1)}`).classList.remove('active'), 500);
+        
+        if (items.length === 0) {
+            speak(`Nothing detected on your ${dir}.`);
+        } else {
+            speak(`${items[0].name} on your ${dir}, about ${items[0].depth.toFixed(1)} meters.`);
+        }
+    }
+    
+    async function detailedScan() {
+        vibrate([30]);
+        speak('Running detailed AI scan. Please wait.');
+        
+        const result = await analyzeWithAI(true);
+        if (result) {
+            speak(result);
+        } else {
+            speak('AI scan complete. No additional hazards detected.');
+        }
+    }
+    
+    // ========== STATUS ==========
+    function updateStatus(status) {
+        const el = document.getElementById('status');
+        el.className = `status-circle ${status}`;
+        el.textContent = status === 'safe' ? '✓' : status === 'warning' ? '!' : '⚠';
+    }
+    
+    // ========== AUTO NAVIGATION ==========
+    async function processNavigation() {
+        if (!state.isRunning) return;
+        
+        const detections = await detect();
+        state.detections = detections;
+        
+        const threat = detections.find(d => d.inPath && (d.priority === 'critical' || d.priority === 'danger'));
+        
+        if (threat && threat.depth < CONFIG.ZONES.immediate) {
+            updateStatus('danger');
+            playTone(1000, 0.15, threat.position === 'left' ? -0.8 : threat.position === 'right' ? 0.8 : 0);
+            vibrate([150, 80, 150]);
+            
+            const now = Date.now();
+            if (now - state.lastVoice > 3000) {
+                const dir = threat.position === 'left' ? 'right' : threat.position === 'right' ? 'left' : 'back';
+                speak(`Stop! ${threat.name}! Go ${dir}!`);
+            }
+        } else if (threat && threat.depth < CONFIG.ZONES.close) {
+            updateStatus('warning');
+            playTone(700, 0.1, threat.position === 'left' ? -0.8 : threat.position === 'right' ? 0.8 : 0);
+        } else {
+            updateStatus('safe');
+        }
+        
+        setTimeout(processNavigation, 500);
+    }
+    
+    // ========== GESTURES ==========
+    function setupGestures() {
+        const area = document.getElementById('touchArea');
+        
+        area.addEventListener('touchstart', e => {
+            const t = e.touches[0];
+            state.touchStart = { x: t.clientX, y: t.clientY, time: Date.now() };
+            state.longPressTimer = setTimeout(() => {
+                vibrate([30]);
+                showHelp();
+            }, 2000);
+        }, { passive: true });
+        
+        area.addEventListener('touchmove', () => {
+            clearTimeout(state.longPressTimer);
+        }, { passive: true });
+        
+        area.addEventListener('touchend', e => {
+            clearTimeout(state.longPressTimer);
+            
+            const t = e.changedTouches[0];
+            const dx = t.clientX - state.touchStart.x;
+            const dy = t.clientY - state.touchStart.y;
+            const duration = Date.now() - state.touchStart.time;
+            
+            if (duration > 1500) return;
+            
+            // Swipe detection
+            if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy)) {
+                checkDirection(dx > 0 ? 'right' : 'left');
+                return;
+            }
+            
+            // Double tap
+            const now = Date.now();
+            if (now - state.lastTap < 400) {
+                detailedScan();
+                state.lastTap = 0;
+                return;
+            }
+            state.lastTap = now;
+            
+            // Single tap zones
+            const y = t.clientY / window.innerHeight;
+            if (y < 0.33) {
+                describeScene();
+            } else if (y > 0.67) {
+                checkSafety();
+            }
+        }, { passive: true });
+    }
+    
+    // ========== HELP ==========
+    function showHelp() {
+        document.getElementById('help').classList.add('visible');
+        speak('Help guide. Tap top of screen to describe surroundings. Tap bottom to check if safe. Double tap for detailed AI scan. Swipe left or right to check sides. Hold 2 seconds for this help.');
+    }
+    
+    function hideHelp() {
+        document.getElementById('help').classList.remove('visible');
+        vibrate([50, 30, 50]);
+        speak('BlindGuide ready. I will alert you to obstacles automatically.');
+        state.isRunning = true;
+        processNavigation();
+    }
+    
+    // ========== INIT ==========
+    async function init() {
+        state.video = document.getElementById('video');
+        initAudio();
+        setupGestures();
+        document.getElementById('helpClose').addEventListener('click', hideHelp);
+        
+        document.getElementById('loadingText').textContent = 'Loading AI...';
+        
+        try {
+            // Load COCO-SSD model
+            state.model = await cocoSsd.load();
+            console.log('Model loaded');
+        } catch (e) {
+            console.error('Model error:', e);
+            // Continue without local model - will use cloud AI
+        }
+        
+        document.getElementById('loadingText').textContent = 'Starting camera...';
+        
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: { facingMode: 'environment', width: { ideal: 640 }, height: { ideal: 480 } },
+                audio: false
+            });
+            state.video.srcObject = stream;
+            await state.video.play();
+        } catch (e) {
+            speak('Camera access required. Please allow camera and refresh.');
+            return;
+        }
+        
+        document.getElementById('loading').classList.add('hidden');
+        
+        // First time help
+        if (!localStorage.getItem('blindguide_used')) {
+            localStorage.setItem('blindguide_used', 'true');
+            showHelp();
+        } else {
+            speak('BlindGuide ready. Tap top to describe, tap bottom to check safety.');
+            state.isRunning = true;
+            processNavigation();
+        }
+    }
+    
+    window.addEventListener('load', init);
+    document.addEventListener('visibilitychange', () => {
+        state.isRunning = !document.hidden;
+        if (!document.hidden) processNavigation();
+    });
+    
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('sw.js').catch(() => {});
+    }
+    </script>
+</body>
+</html>
