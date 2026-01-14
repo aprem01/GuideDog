@@ -1,9 +1,0 @@
-{
-    "name": "BlindGuide",
-    "short_name": "BlindGuide",
-    "description": "Voice navigation for blind users",
-    "start_url": "/",
-    "display": "standalone",
-    "background_color": "#000000",
-    "theme_color": "#000000"
-}
