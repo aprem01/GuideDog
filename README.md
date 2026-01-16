@@ -2,7 +2,7 @@
 
 ## Real-Time Navigation Assistant for the Visually Impaired
 
-GuideDog AI is a smartphone application that helps blind and visually impaired people navigate safely through their environment. It uses the phone's camera to detect obstacles, stairs, doors, and other hazards, then warns the user through voice alerts, directional sounds, and vibration patterns.
+GuideDog AI is a smartphone application (also accessible through web) that helps blind and visually impaired people navigate safely through their environment. It uses the phone's camera to detect obstacles, stairs, doors, and other hazards, then warns the user through voice alerts, directional sounds, and vibration patterns.
 
 Unlike expensive guide dogs or specialized hardware, GuideDog runs entirely on a standard smartphone, making it accessible to anyone who needs it.
 
