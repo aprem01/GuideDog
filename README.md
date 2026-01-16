@@ -361,15 +361,9 @@ We have several enhancements planned:
 
 This project would not have been possible without the visually impaired individuals who tested early versions and provided invaluable feedback. Their real-world perspective shaped every aspect of the design.
 
-We're grateful to the open-source community for TensorFlow.js and the various Web APIs that made this project possible.
+We are grateful to the open-source community for TensorFlow.js and the various Web APIs that made this project possible.
 
 We acknowledge the AI research teams at OpenAI and Anthropic whose vision models power the scene understanding features.
-
----
-
-## License
-
-This project is released under the MIT License. You are free to use, modify, and distribute the code for any purpose.
 
 ---
 
